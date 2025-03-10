@@ -24,6 +24,7 @@ export const COIN = [
   "stSUI",
   "suiBTC",
   "SOL",
+  "LBTC",
 ];
 
 export const DECIMAL_RAY = 27;
@@ -53,6 +54,7 @@ export const DECIMAL_MAP: Record<number, number> = {
   20: 9,
   21: 8,
   22: 8,
+  23: 8,
 };
 
 export const COIN_MAP: CoinMap = {
@@ -101,6 +103,8 @@ export const COIN_MAP: CoinMap = {
     "suiBTC",
   "0xb7844e289a8410e50fb3ca48d69eb9cf29e27d223ef90353fe1bd8e27ff8f3f8::coin::COIN":
     "SOL",
+  "0x3e8e9423d80e1774a7ca128fccd8bf5f1f7753be658c5e645929037f7c819040::lbtc::LBTC":
+    "LBTC",
 };
 
 export const SYMBOL_MAP: Record<number, string> = {
@@ -127,6 +131,7 @@ export const SYMBOL_MAP: Record<number, string> = {
   20: "stSUI",
   21: "suiBTC",
   22: "SOL",
+  23: "LBTC",
 };
 
 export const FlashLoanCoins: Record<string, string> = {
