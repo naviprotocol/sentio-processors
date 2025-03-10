@@ -181,6 +181,7 @@ export function ValidatorProcessor() {
         }
 
         ctx.meter.Gauge("voloTotalStaked").record(vsData.totalStaked);
+        ctx.meter.Gauge("VoloCollectableFee").record(vsData.collectableFee);
 
     }, 60, 60)
 
