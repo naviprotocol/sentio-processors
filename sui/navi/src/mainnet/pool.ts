@@ -1,7 +1,8 @@
 import { SuiObjectProcessor } from "@sentio/sdk/sui";
 import { ChainId } from "@sentio/chain";
 import { BigDecimal } from "@sentio/sdk";
-import { COIN_MAP, getIdBySymbol, SymbolMatcher } from "./utils.js";
+import { COIN_MAP, SymbolMatcher, getIdBySymbol } from "./utils.js";
+import { updateTreasuryBalanceForPool } from "./main.js";
 
 const pools = [
   "0x96df0fce3c471489f4debaaa762cf960b3d97820bd1f3f025ff8190730e958c5", // Treasury Pool For SUI
@@ -56,11 +57,14 @@ export function PoolProcessor() {
         Math.pow(10, decimal)
       );
 
-      //TODO
       if (coin_id !== undefined) {
-        ctx.meter
-          .Gauge("balanceForPool")
-          .record(balance, { env: "mainnet", type, coin_type, coin_symbol, coin_id: coin_id.toString() });
+        ctx.meter.Gauge("balanceForPool").record(balance, {
+          env: "mainnet",
+          type,
+          coin_type,
+          coin_symbol,
+          coin_id: coin_id.toString(),
+        });
         ctx.meter.Gauge("treasuryBalanceForPool").record(treasuryBalance, {
           env: "mainnet",
           type,
@@ -68,6 +72,11 @@ export function PoolProcessor() {
           coin_symbol,
           coin_id: coin_id.toString(),
         });
+
+        // 更新treasury balance for pool缓存
+        if (coin_symbol) {
+          updateTreasuryBalanceForPool(coin_symbol, treasuryBalance);
+        }
       }
     });
   }

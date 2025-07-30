@@ -60,6 +60,7 @@ export const DECIMAL_MAP: Record<number, number> = {
   23: 8,
   24: 9,
   25: 9,
+  26: 8, // XBTC - 8 decimals (same as other BTC assets)
 };
 
 export const COIN_MAP: CoinMap = {
@@ -168,7 +169,8 @@ export const FlashLoanCoins: Record<string, string> = {
   "0x6286fe43b426bfa22dfe9e6ee1adf3aa5c02a3a226e8e042ad0b7b62c9642f56": "NS",
   "0x295499419fc18d02ad508eef0ff9f1f527b913f21a2ce0a396ce3304ee0f19c3": "wBTC",
   "0x9c5745c58a3100c165c211442bd6306e9c6c35c90d81d6d5952da30779438fac": "DEEP",
-  "0xbb6a086d5fecd456b4cbabaa9d62f695e27aed35d26827aa860207f55804f6a6": "suiBTC",
+  "0xbb6a086d5fecd456b4cbabaa9d62f695e27aed35d26827aa860207f55804f6a6":
+    "suiBTC",
   "0xd77386d964efa7cb85396ac046e39a33807341de6681c47543b39f8849be8ecf": "stSUI",
   "0x6babe2eca341c9ca8df2a66ec26b4e57064cc94a10918f547f14f730bbdd4744": "SOL",
   "0xe13a4d24fd3acdaabb7710285260f98a9918fb0d6bc792b3f4c0e3c2616cbf11": "LBTC",
@@ -204,5 +206,5 @@ export function getIdBySymbol(coinSymbol: string): number | undefined {
       return Number(id);
     }
   }
-  return undefined; // 如果找不到 symbol，返回 undefined
+  return undefined; 
 }

@@ -9,5 +9,11 @@
     "test": "sentio test",
     "upload": "sentio upload",
     "postinstall": "sentio gen"
+  },
+  "devDependencies": {
+    "@sentio/cli": "^2.26.3"
+  },
+  "dependencies": {
+    "@sentio/sdk": "^2.58.7"
   }
 }
