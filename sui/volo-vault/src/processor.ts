@@ -804,7 +804,7 @@ async function handleVaultStatusRecorded(
     timestamp: ctx.timestamp,
     tx_hash: ctx.transaction.digest,
     block_number: ctx.checkpoint,
-    share_price: totalUsdValueNormalized / totalSharesNormalized,
+    share_price: sharePrice,
     vault_package:
       "0xc667544f9d0262d24e6d7f2160437d1aa5bcc90a9830772577404ec30c356763",
     data_source: "vault_event_recorder",
