@@ -57,6 +57,18 @@ const vaultVersion = Gauge.register("vault_version");
 // a shape mismatch here would silently report 0 TVL instead of failing.
 type AnyFields = Record<string, any>;
 
+// The Move struct's own fields, from whatever the SDK hands the handler.
+//
+// sdk 4.x passes the whole object envelope — objectId, version, digest, content,
+// owner, type, previousTransaction, objectBcs, json, display — with the struct
+// under `content.fields`. sdk 2.x passed the parsed struct directly, which is why
+// sui/volo-vault reads `self.fields`. Accept both rather than pinning to one.
+function objectFields(self: any): AnyFields {
+  return (
+    self?.content?.fields ?? self?.json ?? self?.fields ?? self ?? {}
+  );
+}
+
 function unwrap(value: any): any {
   if (value && typeof value === "object" && "fields" in value && !("contents" in value)) {
     return value.fields;
@@ -146,7 +158,7 @@ export function VaultStateProcessor() {
 }
 
 async function snapshotVault(vault: VaultInfo, self: any, ctx: SuiObjectContext) {
-  const fields: AnyFields = unwrap(self) ?? {};
+  const fields: AnyFields = objectFields(self);
   const dec = vault.decimals;
   const tags = { vault_key: vault.key, vault_symbol: vault.symbol };
 
@@ -158,6 +170,7 @@ async function snapshotVault(vault: VaultInfo, self: any, ctx: SuiObjectContext)
       vault: vault.vaultId,
       reason: "unexpected object shape: total_shares missing",
       keys: Object.keys(fields).join(","),
+      envelope_keys: self && typeof self === "object" ? Object.keys(self).join(",") : typeof self,
       timestamp: ctx.timestamp,
     });
     return;
