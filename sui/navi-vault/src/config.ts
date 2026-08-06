@@ -20,6 +20,33 @@ import {
 } from "./utils.js";
 
 // ---------------------------------------------------------------------------
+// Config validation
+// ---------------------------------------------------------------------------
+// The registry is a copy of an externally generated file, so a truncated or
+// half-copied version is a real failure mode. Everything below reads it at
+// module load; without this check a bad copy surfaces as a confusing startup
+// failure instead of a named one.
+function assertConfig(): void {
+  const where = "src/config/vaults.mainnet.json";
+  if (!VAULTS_JSON || typeof VAULTS_JSON !== "object") {
+    throw new Error(`${where} is empty or not an object`);
+  }
+  if (!VAULTS_JSON.package?.typeIdentity) {
+    throw new Error(`${where} is missing package.typeIdentity`);
+  }
+  if (!Array.isArray(VAULTS_JSON.vaults) || VAULTS_JSON.vaults.length === 0) {
+    throw new Error(`${where} has no vaults`);
+  }
+  for (const v of VAULTS_JSON.vaults) {
+    if (!v.key || !v.vault || !v.coinType || typeof v.decimals !== "number") {
+      throw new Error(`${where}: vault entry ${JSON.stringify(v?.key)} is incomplete`);
+    }
+  }
+}
+
+assertConfig();
+
+// ---------------------------------------------------------------------------
 // Package identity
 // ---------------------------------------------------------------------------
 // Sui keeps object/event TYPE identity at the ORIGINAL package id across upgrades,
@@ -29,8 +56,33 @@ import {
 export const NAVI_VAULT_PACKAGE = normalizeId(VAULTS_JSON.package.typeIdentity);
 
 // navi_vault was published at checkpoint 289808972 (2026-06-21). Start a little
-// before to be safe.
+// before to be safe. This is the EVENT start: events carry the package's type
+// identity from publication onward, so one range covers every vault.
 export const START_CHECKPOINT = 289800000n;
+
+// Object snapshots are per-object, and an object cannot be read before it is
+// created — binding SuiObjectProcessor to a checkpoint that predates the vault
+// makes startup hang. The two Prime vaults were created 45 days after the first
+// two, so a single shared start range is wrong here even though it is right for
+// events.
+//
+// Checkpoint of the CreateVaultEvent transaction for each vault:
+//   SUI, USDC              289812804  (2026-06-22, tx 9qHXKPNU…)
+//   SUI_PRIME, USDC_PRIME  306919703  (2026-08-05, tx 6JKajTQP…)
+//
+// To find it for a new vault:
+//   suix_queryEvents on <typeIdentity>::events::CreateVaultEvent, then
+//   sui_getTransactionBlock on the returned digest and read `checkpoint`.
+//
+// A vault missing from this map gets no snapshot processor (see
+// state-processor.ts) rather than a guessed range — losing one vault's snapshots
+// is recoverable, another silent startup hang is not.
+const VAULT_CREATED_AT_CHECKPOINT: Record<string, bigint> = {
+  SUI: 289812804n,
+  USDC: 289812804n,
+  SUI_PRIME: 306919703n,
+  USDC_PRIME: 306919703n,
+};
 
 // ---------------------------------------------------------------------------
 // Coin metadata
@@ -94,6 +146,9 @@ export interface VaultInfo {
   decimals: number;
   markets: MarketInfo[];
   marketByPool: Map<string, MarketInfo>;
+  // Checkpoint the vault object was created at, or undefined when unknown.
+  // Snapshot bindings must not start before this.
+  snapshotStartCheckpoint?: bigint;
 }
 
 const VAULT_LIST: VaultInfo[] = VAULTS_JSON.vaults.map((v) => {
@@ -123,6 +178,7 @@ const VAULT_LIST: VaultInfo[] = VAULTS_JSON.vaults.map((v) => {
     decimals: v.decimals,
     markets,
     marketByPool: new Map(markets.map((m) => [m.poolId, m])),
+    snapshotStartCheckpoint: VAULT_CREATED_AT_CHECKPOINT[v.key],
   };
 });
 

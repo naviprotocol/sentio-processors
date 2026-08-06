@@ -12,12 +12,12 @@
 import { SuiObjectProcessor, SuiObjectContext } from "@sentio/sdk/sui";
 import { ChainId } from "@sentio/chain";
 import { Gauge } from "@sentio/sdk";
-import { getAllVaults, getMarketName, VaultInfo, START_CHECKPOINT } from "./config.js";
+import { getAllVaults, getMarketName, VaultInfo } from "./config.js";
 import { scaleAmount, scaleWad, VIRTUAL_SHARES } from "./utils.js";
 
 // Snapshot cadence, in seconds. 10 min ≈ 144 points/vault/day.
 const SNAPSHOT_INTERVAL_MIN = 10;
-const SNAPSHOT_BACKFILL_INTERVAL_MIN = 60;
+const SNAPSHOT_BACKFILL_INTERVAL_MIN = 180;
 
 // ---------------------------------------------------------------------------
 // Metrics
@@ -108,11 +108,31 @@ function readMarkets(marketsField: any): MarketSnapshot[] {
 // Processor
 // ---------------------------------------------------------------------------
 export function VaultStateProcessor() {
-  for (const vault of getAllVaults()) {
+  const vaults = getAllVaults();
+  if (vaults.length === 0) {
+    throw new Error("no vaults configured — refusing to start with no snapshots");
+  }
+
+  for (const vault of vaults) {
+    // Never bind before the object exists. A SuiObjectProcessor whose range
+    // starts before its object was created does not fail — it keeps the whole
+    // processor stuck in STARTING, with no error and no chain state, so it never
+    // reaches BACKFILLING. Skipping is the safe direction: this vault loses
+    // snapshots, everything else still runs, and the gap is visible in the log.
+    const start = vault.snapshotStartCheckpoint;
+    if (start === undefined) {
+      console.error(
+        `[navi-vault] ${vault.key} (${vault.vaultId}) has no creation checkpoint in ` +
+          `VAULT_CREATED_AT_CHECKPOINT — skipping its snapshot processor. Add it to ` +
+          `src/config.ts to restore TVL / share price for this vault.`,
+      );
+      continue;
+    }
+
     SuiObjectProcessor.bind({
       objectId: vault.vaultId,
       network: ChainId.SUI_MAINNET,
-      startCheckpoint: START_CHECKPOINT,
+      startCheckpoint: start,
     }).onTimeInterval(
       async (self, _dynamicFields, ctx) => {
         await snapshotVault(vault, self, ctx);
