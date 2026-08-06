@@ -102,6 +102,26 @@ idempotent and runs automatically after every `sentio gen`:
 
 So the flow is: **`yarn gen` (or `yarn install`, via postinstall) then `yarn upload`.**
 
+## After uploading: give it ~50 minutes before concluding anything
+
+A freshly uploaded version sits in `STARTING` for a long time — measured at
+**49 minutes** for a version starting at checkpoint 289800000. For that entire
+window there is no feedback of any kind:
+
+- `processorStatus.state` stays `STARTING`
+- `states` (per-chain progress) stays empty
+- the Processor Log panel is completely empty
+- the version badge says `backfill` and the stats panel says "initiating"
+
+None of that indicates a problem. The first real signal is the Processor Log
+filling with `Processing from <n> to <m>` lines, at which point the status flips
+to `PROCESSING` / `PROCESSING_LATEST`.
+
+**Uploading a new version immediately deactivates the current one**, so a version
+killed at the 20–30 minute mark never gets to finish starting. Do not re-upload
+to "retry" a version that looks stuck — that resets the clock and produces a
+convincing but false impression that nothing works. Wait it out first.
+
 ## Commands
 
 ```bash
