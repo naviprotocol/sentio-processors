@@ -18,6 +18,7 @@ import {
   DEFAULT_COIN_DECIMAL,
 } from "./utils.js";
 import { VaultStateProcessor } from "./state-processor.js";
+import { OraclePriceProcessor } from "./oracle-processor.js";
 
 // ---------------------------------------------------------------------------
 // Metrics
@@ -682,3 +683,4 @@ async function onWithdrawReward(event: events.WithdrawRewardEventInstance, ctx: 
 
 NaviVaultProcessor();
 VaultStateProcessor();
+OraclePriceProcessor();

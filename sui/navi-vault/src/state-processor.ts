@@ -90,6 +90,28 @@ interface MarketSnapshot {
   loss: number;
   lastSyncAtMs: number;
   status: string;
+  statusRaw: string;
+}
+
+// MarketStatus is a Move enum (Active | Disabled). How it arrives depends on the
+// decoder: the fullnode's JSON gives { type, variant: "Active", fields: {} },
+// but sdk 4.x has been observed handing back other encodings. Reading only
+// `.variant` left every market labelled "unknown" while the numbers were fine,
+// so accept the shapes an enum can plausibly take and surface anything else raw
+// rather than flattening it to "unknown".
+function readStatus(raw: any): string {
+  if (raw === null || raw === undefined) return "unknown";
+  if (typeof raw === "string") return raw.split("::").pop() || "unknown";
+  if (typeof raw === "number") return raw === 0 ? "Active" : raw === 1 ? "Disabled" : String(raw);
+  if (typeof raw === "object") {
+    const named = raw.variant ?? raw.$kind ?? raw.name;
+    if (typeof named === "string") return named.split("::").pop() || "unknown";
+    // Enum-as-single-key object: { Active: {} }
+    const keys = Object.keys(raw).filter((k) => k !== "type" && k !== "fields");
+    if (keys.length === 1) return keys[0];
+    if (raw.fields && typeof raw.fields === "object") return readStatus(raw.fields);
+  }
+  return "unknown";
 }
 
 function readMarkets(marketsField: any): MarketSnapshot[] {
@@ -100,10 +122,7 @@ function readMarkets(marketsField: any): MarketSnapshot[] {
   return contents.map((entry: any) => {
     const e: AnyFields = unwrap(entry) ?? {};
     const v: AnyFields = unwrap(e.value) ?? {};
-    // MarketStatus is a Move enum, which lands as a nested
-    // { type, variant: "Active" | "Disabled", fields: {} } on the MarketInfo —
-    // not as a bare string, and not on the entry itself.
-    const statusRaw = v.status?.variant ?? v.status;
+    const status = readStatus(v.status);
     return {
       poolId: String(e.key ?? ""),
       currentBalance: num(v.current_balance),
@@ -111,7 +130,10 @@ function readMarkets(marketsField: any): MarketSnapshot[] {
       penalty: num(v.penalty),
       loss: num(v.loss),
       lastSyncAtMs: num(v.last_sync_at),
-      status: typeof statusRaw === "string" ? statusRaw : "unknown",
+      status,
+      // Kept so a still-unrecognised encoding is visible in the snapshot log
+      // instead of silently collapsing to "unknown" again.
+      statusRaw: status === "unknown" ? JSON.stringify(v.status ?? null).slice(0, 120) : "",
     };
   });
 }
@@ -126,11 +148,13 @@ export function VaultStateProcessor() {
   }
 
   for (const vault of vaults) {
-    // Never bind before the object exists. A SuiObjectProcessor whose range
-    // starts before its object was created does not fail — it keeps the whole
-    // processor stuck in STARTING, with no error and no chain state, so it never
-    // reaches BACKFILLING. Skipping is the safe direction: this vault loses
-    // snapshots, everything else still runs, and the gap is visible in the log.
+    // Don't bind before the object exists — there is nothing to read there, and
+    // the snapshots would be wasted work over the 45 days between the first two
+    // vaults and the Prime pair. (An earlier comment here blamed this for a
+    // startup hang; that was wrong. The hang was a slow first-time cold start on
+    // Sentio's side, unrelated to these bindings.)
+    // Skipping is still the safe direction for an unknown vault: it loses that
+    // vault's snapshots, everything else runs, and the gap is logged.
     const start = vault.snapshotStartCheckpoint;
     if (start === undefined) {
       console.error(
@@ -239,6 +263,14 @@ async function snapshotVault(vault: VaultInfo, self: any, ctx: SuiObjectContext)
       market_name: getMarketName(vault.vaultId, m.poolId),
       status: m.status,
     };
+    if (m.statusRaw) {
+      ctx.eventLogger.emit("MarketStatusUnrecognised", {
+        ...tags,
+        market_name: marketTags.market_name,
+        raw: m.statusRaw,
+        timestamp: ctx.timestamp,
+      });
+    }
     marketBalanceSnapshot.record(ctx, scaleAmount(m.currentBalance, dec), marketTags);
     marketLoss.record(ctx, scaleAmount(m.loss, dec), marketTags);
     marketSyncAge.record(

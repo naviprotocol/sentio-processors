@@ -85,6 +85,37 @@ const VAULT_CREATED_AT_CHECKPOINT: Record<string, bigint> = {
 };
 
 // ---------------------------------------------------------------------------
+// Price oracle
+// ---------------------------------------------------------------------------
+// vaults.mainnet.json's `priceOracle` is the PriceOracle wrapper object; the
+// prices themselves sit in its `price_oracles` field, a Table<u8, Price> with
+// its own object id. SuiWrappedObjectProcessor has to bind to the TABLE to see
+// the per-asset dynamic fields, so that id is recorded here rather than derived.
+//
+// To re-derive it: sui_getObject on VAULTS_JSON.sharedObjects.priceOracle and
+// read content.fields.price_oracles.fields.id.id.
+export const PRICE_TABLE_ID =
+  "0xc0601facd3b98d1e82905e660bf9f5998097dedcf86ed802cf485865e3e3667c";
+
+// The oracle long predates the vaults; starting at the first vault's creation
+// keeps the price series aligned with the TVL series it is meant to multiply.
+export const PRICE_TABLE_START_CHECKPOINT = 289812804n;
+
+// Navi keys prices by a numeric asset id, not by coin type. Only the ids this
+// project can actually need are named — the vault underlyings and the reward
+// coins. Anything else still gets a price series, labelled by its raw id.
+const ASSET_SYMBOL_BY_ID: Record<number, string> = {
+  0: "SUI",
+  5: "vSUI",
+  7: "NAVX",
+  10: "USDC",
+};
+
+export function getAssetSymbol(assetId: number): string {
+  return ASSET_SYMBOL_BY_ID[assetId] ?? `asset_${assetId}`;
+}
+
+// ---------------------------------------------------------------------------
 // Coin metadata
 // ---------------------------------------------------------------------------
 type CoinDefinition = {
