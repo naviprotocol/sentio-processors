@@ -104,11 +104,19 @@ function readStatus(raw: any): string {
   if (typeof raw === "string") return raw.split("::").pop() || "unknown";
   if (typeof raw === "number") return raw === 0 ? "Active" : raw === 1 ? "Disabled" : String(raw);
   if (typeof raw === "object") {
-    const named = raw.variant ?? raw.$kind ?? raw.name;
+    // sdk 4.x encodes it as { "@variant": "Active" }; the fullnode uses
+    // { type, variant: "Active", fields: {} }.
+    const named = raw["@variant"] ?? raw.variant ?? raw.$kind ?? raw.name;
     if (typeof named === "string") return named.split("::").pop() || "unknown";
-    // Enum-as-single-key object: { Active: {} }
-    const keys = Object.keys(raw).filter((k) => k !== "type" && k !== "fields");
+
+    // Enum-as-single-key object: { Active: {} }. Only the key can be the variant
+    // name here, so ignore structural keys and anything sigil-prefixed — taking
+    // the key blindly is what turned "@variant" itself into the label.
+    const keys = Object.keys(raw).filter(
+      (k) => k !== "type" && k !== "fields" && !k.startsWith("@") && !k.startsWith("$"),
+    );
     if (keys.length === 1) return keys[0];
+
     if (raw.fields && typeof raw.fields === "object") return readStatus(raw.fields);
   }
   return "unknown";
