@@ -61,10 +61,9 @@ export const NAVI_VAULT_PACKAGE = normalizeId(VAULTS_JSON.package.typeIdentity);
 export const START_CHECKPOINT = 289800000n;
 
 // Object snapshots are per-object, and an object cannot be read before it is
-// created — binding SuiObjectProcessor to a checkpoint that predates the vault
-// makes startup hang. The two Prime vaults were created 45 days after the first
-// two, so a single shared start range is wrong here even though it is right for
-// events.
+// created. The two Prime vaults were created 45 days after the first two, so a
+// single shared start range wastes 45 days of snapshots on objects that do not
+// exist yet — right for events, wrong here.
 //
 // Checkpoint of the CreateVaultEvent transaction for each vault:
 //   SUI, USDC              289812804  (2026-06-22, tx 9qHXKPNU…)
@@ -76,44 +75,13 @@ export const START_CHECKPOINT = 289800000n;
 //
 // A vault missing from this map gets no snapshot processor (see
 // state-processor.ts) rather than a guessed range — losing one vault's snapshots
-// is recoverable, another silent startup hang is not.
+// is recoverable and visible in the log; a guessed range is neither.
 const VAULT_CREATED_AT_CHECKPOINT: Record<string, bigint> = {
   SUI: 289812804n,
   USDC: 289812804n,
   SUI_PRIME: 306919703n,
   USDC_PRIME: 306919703n,
 };
-
-// ---------------------------------------------------------------------------
-// Price oracle
-// ---------------------------------------------------------------------------
-// vaults.mainnet.json's `priceOracle` is the PriceOracle wrapper object; the
-// prices themselves sit in its `price_oracles` field, a Table<u8, Price> with
-// its own object id. SuiWrappedObjectProcessor has to bind to the TABLE to see
-// the per-asset dynamic fields, so that id is recorded here rather than derived.
-//
-// To re-derive it: sui_getObject on VAULTS_JSON.sharedObjects.priceOracle and
-// read content.fields.price_oracles.fields.id.id.
-export const PRICE_TABLE_ID =
-  "0xc0601facd3b98d1e82905e660bf9f5998097dedcf86ed802cf485865e3e3667c";
-
-// The oracle long predates the vaults; starting at the first vault's creation
-// keeps the price series aligned with the TVL series it is meant to multiply.
-export const PRICE_TABLE_START_CHECKPOINT = 289812804n;
-
-// Navi keys prices by a numeric asset id, not by coin type. Only the ids this
-// project can actually need are named — the vault underlyings and the reward
-// coins. Anything else still gets a price series, labelled by its raw id.
-const ASSET_SYMBOL_BY_ID: Record<number, string> = {
-  0: "SUI",
-  5: "vSUI",
-  7: "NAVX",
-  10: "USDC",
-};
-
-export function getAssetSymbol(assetId: number): string {
-  return ASSET_SYMBOL_BY_ID[assetId] ?? `asset_${assetId}`;
-}
 
 // ---------------------------------------------------------------------------
 // Coin metadata
