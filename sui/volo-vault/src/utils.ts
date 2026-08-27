@@ -135,7 +135,16 @@ function buildVaultEntries(): VaultEntry[] {
   for (const [configKey, raw] of Object.entries(
     ADDRESSES_PRODUCTION.vaults
   ) as Array<[string, VaultConfig]>) {
-    const coinSymbol = resolveCoinSymbol(raw.coinSymbol);
+    // Resolve the symbol from the coin TYPE, which is exact, and fall back to the
+    // configured name only when the type is unknown. Matching on the name alone
+    // silently loses: the vault config calls 0xdba34672…::usdc::USDC "USDC" while
+    // the coin table calls it "nUSDC", so resolveCoinSymbol returned "USDC"
+    // unchanged, getDecimalBySymbol found nothing, and every amount for three
+    // USDC vaults was divided by 1e9 instead of 1e6 — understated 1000x, with no
+    // error anywhere.
+    const coinSymbol =
+      COIN_MAP[raw.coinType as keyof typeof COIN_MAP] ??
+      resolveCoinSymbol(raw.coinSymbol);
     const vaultStructType = `${VAULT_PACKAGE_PROD}::vault::Vault<${raw.coinType}>`;
     const defiAssets = ("defiAssets" in raw ? raw.defiAssets : {}) as Record<
       string,

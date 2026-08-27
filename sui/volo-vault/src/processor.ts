@@ -89,8 +89,38 @@ function getOrCreateVaultDepositorStats(vaultId: string): VaultDepositorStats {
 }
 
 // Helper function to get default coin symbol
-function getDefaultCoinSymbol(): string {
-  return "suiBTC"; // Default to suiBTC as it's the most common vault
+/**
+ * What to call a vault whose id is not in the mapping.
+ *
+ * This used to return "suiBTC", "as it's the most common vault". That is a guess,
+ * and a guess here does not stay a label: the symbol picks the decimals, and the
+ * decimals scale the amount. An unmapped USDC vault was recorded as suiBTC at 8
+ * decimals, turning 173,860 USDC of flow into "1,738.6 suiBTC" — a number that
+ * reads as nine figures of BTC and is wrong in both the asset and the scale.
+ *
+ * An unknown asset is now called unknown, and its amounts are left unscaled rather
+ * than scaled by somebody else's decimals. Add the vault to ADDRESSES_PRODUCTION
+ * .vaults and the labels come back.
+ */
+const UNRESOLVED_COIN_SYMBOL = "UNKNOWN";
+
+/**
+ * Coin symbol and decimals for a vault, or nulls when the vault is not mapped.
+ * `decimals: null` means "do not normalise" — never "use the default".
+ */
+function resolveCoinForVault(vaultId: string): {
+  coinSymbol: string;
+  tokenDecimals: number | null;
+} {
+  const info = getVaultInfoById(vaultId);
+  if (!info?.coinSymbol) {
+    return { coinSymbol: UNRESOLVED_COIN_SYMBOL, tokenDecimals: null };
+  }
+  const decimals = getDecimalBySymbol(info.coinSymbol);
+  return {
+    coinSymbol: info.coinSymbol,
+    tokenDecimals: decimals === undefined ? null : decimals,
+  };
 }
 
 export function VoloVaultProcessor() {
@@ -192,12 +222,15 @@ async function handleDepositRequested(
   const amount = Number(data.amount);
 
   const vaultInfo = getVaultInfoById(data.vault_id);
-  let coinSymbol = vaultInfo?.coinSymbol || getDefaultCoinSymbol();
-  let tokenDecimals = getDecimalBySymbol(coinSymbol) || DEFAULT_COIN_DECIMAL;
+  const { coinSymbol, tokenDecimals } = resolveCoinForVault(data.vault_id);
   let vaultType = vaultInfo?.vaultType || "UNKNOWN_VAULT";
 
-  // Apply precision normalization
-  const amountNormalized = applyTokenDecimalPrecision(amount, tokenDecimals);
+  // Normalise only when the decimals are known. null, not a default: a wrongly
+  // scaled amount is indistinguishable from a real one downstream.
+  const amountNormalized =
+    tokenDecimals === null
+      ? null
+      : applyTokenDecimalPrecision(amount, tokenDecimals);
   const expectedSharesNormalized = applyVaultPrecision(data.expected_shares);
 
   ctx.eventLogger.emit("vaultEvent", {
@@ -226,12 +259,15 @@ async function handleDepositExecuted(
   const amount = Number(data.amount);
 
   const vaultInfo = getVaultInfoById(data.vault_id);
-  let coinSymbol = vaultInfo?.coinSymbol || getDefaultCoinSymbol();
-  let tokenDecimals = getDecimalBySymbol(coinSymbol) || DEFAULT_COIN_DECIMAL;
+  const { coinSymbol, tokenDecimals } = resolveCoinForVault(data.vault_id);
   let vaultType = vaultInfo?.vaultType || "UNKNOWN_VAULT";
 
-  // Apply precision normalization
-  const amountNormalized = applyTokenDecimalPrecision(amount, tokenDecimals);
+  // Normalise only when the decimals are known. null, not a default: a wrongly
+  // scaled amount is indistinguishable from a real one downstream.
+  const amountNormalized =
+    tokenDecimals === null
+      ? null
+      : applyTokenDecimalPrecision(amount, tokenDecimals);
   const sharesNormalized = applyVaultPrecision(data.shares);
 
   // Update basic statistics
@@ -292,7 +328,7 @@ async function handleDepositCancelled(
     amount: data.amount,
 
     vault_type: vaultInfo?.vaultType || "UNKNOWN_VAULT",
-    coin_symbol: vaultInfo?.coinSymbol || getDefaultCoinSymbol(),
+    coin_symbol: vaultInfo?.coinSymbol || UNRESOLVED_COIN_SYMBOL,
     timestamp: ctx.timestamp,
     tx_hash: ctx.transaction.digest,
   });
@@ -323,12 +359,15 @@ async function handleWithdrawExecuted(
   const amount = Number(data.amount);
 
   const vaultInfo = getVaultInfoById(data.vault_id);
-  let coinSymbol = vaultInfo?.coinSymbol || getDefaultCoinSymbol();
-  let tokenDecimals = getDecimalBySymbol(coinSymbol) || DEFAULT_COIN_DECIMAL;
+  const { coinSymbol, tokenDecimals } = resolveCoinForVault(data.vault_id);
   let vaultType = vaultInfo?.vaultType || "UNKNOWN_VAULT";
 
-  // Apply precision normalization
-  const amountNormalized = applyTokenDecimalPrecision(amount, tokenDecimals);
+  // Normalise only when the decimals are known. null, not a default: a wrongly
+  // scaled amount is indistinguishable from a real one downstream.
+  const amountNormalized =
+    tokenDecimals === null
+      ? null
+      : applyTokenDecimalPrecision(amount, tokenDecimals);
   const sharesNormalized = applyVaultPrecision(data.shares);
 
   // Update basic statistics
@@ -368,7 +407,7 @@ async function handleWithdrawCancelled(
     shares: data.shares,
 
     vault_type: vaultInfo?.vaultType || "UNKNOWN_VAULT",
-    coin_symbol: vaultInfo?.coinSymbol || getDefaultCoinSymbol(),
+    coin_symbol: vaultInfo?.coinSymbol || UNRESOLVED_COIN_SYMBOL,
     timestamp: ctx.timestamp,
     tx_hash: ctx.transaction.digest,
   });
@@ -454,7 +493,7 @@ async function handleTotalUSDValueUpdated(
     total_usd_value: totalUsdValueNormalized,
 
     vault_type: vaultInfo?.vaultType || "UNKNOWN_VAULT",
-    coin_symbol: vaultInfo?.coinSymbol || getDefaultCoinSymbol(),
+    coin_symbol: vaultInfo?.coinSymbol || UNRESOLVED_COIN_SYMBOL,
     oracle_precision: 18,
     tx_hash: ctx.transaction.digest,
   });
