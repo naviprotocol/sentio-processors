@@ -1,0 +1,77 @@
+Upload the volo-vault processor
+===============================
+
+Everything below is committed on branch `feat/volo-vault-v12` in
+naviprotocol/sentio-processors. Two commits:
+
+  90ccbe77  feat(volo-vault): index package v12, its NAVI multi-market and swap events
+  8eba8d75  fix(volo-vault): stop scaling amounts by decimals the coin does not have
+
+I could not run the upload myself — deploying to the live project is blocked for
+me, so the command is here for you to run.
+
+
+RUN THIS
+--------
+
+cd /Users/haodong/Documents/navi/sentio-processors/sui/volo-vault && ./scripts/codegen.sh upload
+
+
+Not `npx sentio upload` directly: it runs codegen first, and codegen on this CLI
+version calls JSON-RPC methods the public Sui fullnodes have retired, with no flag
+to point it elsewhere. The script patches the SDK endpoint for the duration of the
+one command and reverts it on exit, failing loudly if the revert does not take.
+
+The API key comes from SENTIO_API_KEY, or ~/.sentio/config.json if that is unset.
+It must be write-capable for navi/volo-vault.
+
+
+WHAT LANDS
+----------
+
+New coverage — seven events that package v12 added and nobody was recording:
+
+  NaviMarketRegistryInitialized / NaviMarketAdded / NaviMarketRemoved
+      The vault used to be pinned to NAVI market 0 by a hot-fix. It can now hold
+      positions across several markets, and these are the only on-chain record of
+      which. This is the part worth having.
+  VaultCuratorPositionBound
+  WithdrawSwapRequested / WithdrawWithSwapExecuted / WithdrawSwapRequestDropped
+      The zap-out legs, with allowed slippage and the headroom execution left
+      above the floor it was permitted to accept.
+
+Behaviour change — amounts stop being scaled by the wrong decimals:
+
+  Three USDC vaults (0xa97cc9a6, 0x828a61bb, 0x27936e14) were divided by 1e9
+  instead of 1e6. Their amounts have been understated 1000x and will now be
+  correct going forward.
+
+  Vault 0xd27fad0f is a USDC vault that was labelled suiBTC — 173,860 USDC of
+  14-day flow recorded as "1,738.6 suiBTC". It is absent from the processor's
+  vault config entirely, so it is now labelled UNKNOWN with amount_normalized
+  left null rather than scaled by somebody else's decimals.
+
+
+CHECK AFTER IT DEPLOYS
+----------------------
+
+Backfill runs from checkpoint 175000000, so give it time before judging. Then:
+
+cd /Users/haodong/Documents/navi/sentio-alerts && node scripts/volo-vault-label-audit.mjs
+
+Expect: 0 vaults with a corrupted amount scale. 0xd27fad0f will still show as
+unresolved — that is the intended state until Volo supplies its config.
+
+
+TWO THINGS FOR VOLO
+-------------------
+
+1. Vault 0xd27fad0f — USDC-5 in their own rollout-after.json — is missing from
+   ADDRESSES_PRODUCTION.vaults. Adding it needs rewardManager, receiptsId and
+   aggregators, which are theirs to provide. Until then its amounts are recorded
+   raw and unlabelled.
+
+2. Historical rows are not corrected by this deploy. Everything before it carries
+   the old scaling: the three USDC vaults understated 1000x, and 0xd27fad0f
+   mislabelled as suiBTC. Anything already built on those numbers needs re-reading,
+   and a full reprocess is the only way to fix the history.

@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 #
-# Run `sentio gen` against a Sui RPC endpoint that still serves JSON-RPC.
+# Run a `sentio` command against a Sui RPC endpoint that still serves JSON-RPC.
 #
-#   ./scripts/codegen.sh
+#   ./scripts/codegen.sh                 # gen (the default)
+#   ./scripts/codegen.sh upload          # build + upload; codegen runs first
 #   SUI_RPC=https://some-other-endpoint ./scripts/codegen.sh
 #
 # Why this exists. @sentio/cli 2.26.3 does codegen through JSON-RPC
@@ -27,6 +28,7 @@
 
 set -euo pipefail
 
+CMD="${1:-gen}"
 RPC="${SUI_RPC:-https://rpc-mainnet.suiscan.xyz}"
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 NETWORK_JS="$(cd "$HERE/../.." && pwd)/node_modules/@sentio/sdk/lib/sui/network.js"
@@ -50,9 +52,9 @@ restore() {
 }
 trap restore EXIT
 
-echo "codegen via $RPC"
+echo "sentio $CMD via $RPC"
 sed -i '' "s|https://fullnode.mainnet.sui.io/|$RPC|" "$NETWORK_JS"
 grep -q "$RPC" "$NETWORK_JS" || { echo "patch did not apply" >&2; exit 1; }
 
 cd "$HERE"
-npx sentio gen
+npx sentio "$CMD"
