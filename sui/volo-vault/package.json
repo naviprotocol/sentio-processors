@@ -6,9 +6,10 @@
   "scripts": {
     "build": "sentio build",
     "gen": "sentio gen",
+    "gen:rpc": "./scripts/codegen.sh",
     "test": "sentio test",
     "upload": "sentio upload",
-    "postinstall": "sentio gen"
+    "postinstall": "./scripts/codegen.sh"
   },
   "dependencies": {
     "@sentio/sdk": "^2.59.4",

@@ -8,7 +8,18 @@ import { ChainId } from "@sentio/chain";
 import { Gauge, Counter } from "@sentio/sdk";
 import { dynamic_field } from "@sentio/sdk/sui/builtin/0x2";
 import { TypeDescriptor, BUILTIN_TYPES } from "@sentio/sdk/move";
-import { vault } from "./types/sui/0xc016d83a05418430e72acb76eced534096af83628a0c78803b1b021bc179f3ad.js";
+// Package v12 (published-at 0x7518aa0d, 2026-08-26). The generated module is named
+// by published-at, but every processor below still binds to the ORIGINAL package id
+// via VAULT_ADDRESS — event type tags carry the original id and do not move on an
+// upgrade, so the bindings survive this one and the next one untouched.
+import {
+  vault,
+  navi_adaptor,
+  curator_position,
+  operation,
+  swap_request,
+  user_entry,
+} from "./types/sui/0x7518aa0d909c44c66db3f7e3881d812e7339aa16efe0de37205873e444fa83cf.js";
 import { vault_fee_record } from "./types/sui/0xcecac1d9cafdc922a8974675c32a53473e43f227d34c8695a94413c723832633.js";
 
 // import { VoloApiProcessor } from "./backend.js";
@@ -825,7 +836,297 @@ vault_event_recorder
   .onEventVaultStatusRecorded(handleVaultStatusRecorded);
 
 // Initialize all processors
+// ---------------------------------------------------------------------------
+// Package v12 events: the NAVI multi-market registry, and withdraw-with-swap.
+//
+// Before v12 the vault was pinned to NAVI market 0 by a hot-fix. It can now hold
+// positions across several markets at once, and NaviMarketAdded / NaviMarketRemoved
+// are the only on-chain record of which. Nothing else says where the vault's NAVI
+// exposure sits, so these are the highest-value events in this release.
+//
+// The withdraw-with-swap path does NOT replace WithdrawExecuted: finish_execute_
+// withdraw_with_swap calls vault::execute_withdraw internally, so principal
+// accounting above is unaffected and is not double counted here. What was missing
+// is the swap leg — what the principal was turned into, at what slippage, and
+// whether execution landed near the floor it was allowed to accept.
+// ---------------------------------------------------------------------------
+
+/**
+ * Resolve a Move `type_name` string to a known coin symbol.
+ *
+ * `type_name::into_string()` omits the `0x`, while COIN_MAP is keyed with it, so a
+ * naive lookup misses every asset. Returns null rather than a guess when the type
+ * is not one we know: an unrecognised asset must not be silently normalised with
+ * some default decimal count, which is how this repo has produced plausible wrong
+ * numbers before.
+ */
+function resolveAssetSymbol(assetType: string): string | null {
+  const raw = String(assetType);
+  const candidates = raw.startsWith("0x") ? [raw, raw.slice(2)] : [raw, "0x" + raw];
+  for (const c of candidates) {
+    const symbol = (COIN_MAP as Record<string, string | undefined>)[c];
+    if (symbol) return symbol;
+  }
+  return null;
+}
+
+function vaultLabels(vaultId: string) {
+  const info = getVaultInfoById(vaultId);
+  return {
+    vault_id: vaultId,
+    vault_type: info?.vaultType || "UNKNOWN_VAULT",
+    coin_symbol: info?.coinSymbol || "UNKNOWN",
+  };
+}
+
+async function handleNaviMarketRegistryInitialized(
+  event: navi_adaptor.NaviMarketRegistryInitializedInstance,
+  ctx: SuiContext
+) {
+  const data = event.data_decoded;
+  const labels = vaultLabels(data.vault_id);
+
+  ctx.meter.Counter("navi_market_registry_initialized").add(1, {
+    vault_type: labels.vault_type,
+    migration: String(data.migration),
+  });
+
+  ctx.eventLogger.emit("naviMarketEvent", {
+    ...labels,
+    event_type: "NaviMarketRegistryInitialized",
+    // True when installed through the migration path, which also emits one
+    // NaviMarketAdded per existing account cap.
+    migration: data.migration,
+    timestamp: ctx.timestamp,
+  });
+}
+
+async function handleNaviMarketAdded(
+  event: navi_adaptor.NaviMarketAddedInstance,
+  ctx: SuiContext
+) {
+  const data = event.data_decoded;
+  const labels = vaultLabels(data.vault_id);
+  const assetSymbol = resolveAssetSymbol(data.asset_type);
+
+  ctx.meter.Counter("navi_market_binding_changed").add(1, {
+    vault_type: labels.vault_type,
+    direction: "added",
+    market_id: String(data.market_id),
+  });
+
+  ctx.eventLogger.emit("naviMarketEvent", {
+    ...labels,
+    event_type: "NaviMarketAdded",
+    market_id: Number(data.market_id),
+    asset_type: String(data.asset_type),
+    asset_symbol: assetSymbol ?? "UNKNOWN",
+    timestamp: ctx.timestamp,
+  });
+}
+
+async function handleNaviMarketRemoved(
+  event: navi_adaptor.NaviMarketRemovedInstance,
+  ctx: SuiContext
+) {
+  const data = event.data_decoded;
+  const labels = vaultLabels(data.vault_id);
+  const assetSymbol = resolveAssetSymbol(data.asset_type);
+
+  ctx.meter.Counter("navi_market_binding_changed").add(1, {
+    vault_type: labels.vault_type,
+    direction: "removed",
+    market_id: String(data.market_id),
+  });
+
+  ctx.eventLogger.emit("naviMarketEvent", {
+    ...labels,
+    event_type: "NaviMarketRemoved",
+    market_id: Number(data.market_id),
+    asset_type: String(data.asset_type),
+    asset_symbol: assetSymbol ?? "UNKNOWN",
+    timestamp: ctx.timestamp,
+  });
+}
+
+async function handleVaultCuratorPositionBound(
+  event: curator_position.VaultCuratorPositionBoundInstance,
+  ctx: SuiContext
+) {
+  const data = event.data_decoded;
+  const labels = vaultLabels(data.vault_id);
+
+  ctx.meter.Counter("vault_curator_position_bound").add(1, {
+    vault_type: labels.vault_type,
+  });
+
+  ctx.eventLogger.emit("naviMarketEvent", {
+    ...labels,
+    event_type: "VaultCuratorPositionBound",
+    curator_position_id: data.curator_position_id,
+    timestamp: ctx.timestamp,
+  });
+}
+
+async function handleWithdrawSwapRequested(
+  event: user_entry.WithdrawSwapRequestedInstance,
+  ctx: SuiContext
+) {
+  const data = event.data_decoded;
+  const labels = vaultLabels(data.vault_id);
+  const targetSymbol = resolveAssetSymbol(data.target_asset_type);
+
+  ctx.meter.Counter("withdraw_swap_requested").add(1, {
+    vault_type: labels.vault_type,
+    target_asset: targetSymbol ?? "UNKNOWN",
+  });
+
+  ctx.eventLogger.emit("withdrawSwapEvent", {
+    ...labels,
+    event_type: "WithdrawSwapRequested",
+    request_id: Number(data.request_id),
+    recipient: data.recipient,
+    target_asset_type: String(data.target_asset_type),
+    target_asset_symbol: targetSymbol ?? "UNKNOWN",
+    slippage_bps: Number(data.slippage_bps),
+    shares: data.shares,
+    shares_normalized: applyVaultPrecision(Number(data.shares)),
+    timestamp: ctx.timestamp,
+  });
+}
+
+async function handleWithdrawWithSwapExecuted(
+  event: operation.WithdrawWithSwapExecutedInstance,
+  ctx: SuiContext
+) {
+  const data = event.data_decoded;
+  const labels = vaultLabels(data.vault_id);
+  const targetSymbol = resolveAssetSymbol(data.target_asset_type);
+
+  const received = Number(data.target_asset_amount);
+  const minOut = Number(data.target_asset_min_amount_out);
+
+  // How much room execution left above the floor it was allowed to accept. Zero
+  // means it filled exactly at the limit; the contract aborts below it, so this is
+  // never negative. Expressed against minOut because the two are the same asset
+  // and the same scale, whatever that scale is.
+  const headroomBps = minOut > 0 ? ((received - minOut) / minOut) * 10000 : 0;
+
+  ctx.meter.Counter("withdraw_swap_executed").add(1, {
+    vault_type: labels.vault_type,
+    target_asset: targetSymbol ?? "UNKNOWN",
+  });
+  ctx.meter.Gauge("withdraw_swap_allowed_slippage_bps").record(
+    Number(data.slippage_bps),
+    { vault_type: labels.vault_type, target_asset: targetSymbol ?? "UNKNOWN" }
+  );
+  ctx.meter.Gauge("withdraw_swap_headroom_bps").record(headroomBps, {
+    vault_type: labels.vault_type,
+    target_asset: targetSymbol ?? "UNKNOWN",
+  });
+
+  ctx.eventLogger.emit("withdrawSwapEvent", {
+    ...labels,
+    event_type: "WithdrawWithSwapExecuted",
+    request_id: Number(data.request_id),
+    recipient: data.recipient,
+    target_asset_type: String(data.target_asset_type),
+    target_asset_symbol: targetSymbol ?? "UNKNOWN",
+    // Raw only. The target asset's decimals are not known for an asset outside
+    // COIN_MAP, and a wrongly scaled amount is worse than an unscaled one.
+    target_asset_amount: data.target_asset_amount,
+    target_asset_min_amount_out: data.target_asset_min_amount_out,
+    slippage_bps: Number(data.slippage_bps),
+    headroom_bps: headroomBps,
+    timestamp: ctx.timestamp,
+  });
+}
+
+async function handleWithdrawSwapRequestDropped(
+  event: swap_request.WithdrawSwapRequestDroppedInstance,
+  ctx: SuiContext
+) {
+  const data = event.data_decoded;
+  const labels = vaultLabels(data.vault_id);
+  const targetSymbol = resolveAssetSymbol(data.target_asset_type);
+
+  // A dropped request is the swap leg being abandoned after the principal side
+  // already resolved, so it is worth counting separately rather than folding into
+  // the executed counter.
+  ctx.meter.Counter("withdraw_swap_request_dropped").add(1, {
+    vault_type: labels.vault_type,
+    target_asset: targetSymbol ?? "UNKNOWN",
+  });
+
+  ctx.eventLogger.emit("withdrawSwapEvent", {
+    ...labels,
+    event_type: "WithdrawSwapRequestDropped",
+    request_id: Number(data.request_id),
+    recipient: data.recipient,
+    target_asset_type: String(data.target_asset_type),
+    target_asset_symbol: targetSymbol ?? "UNKNOWN",
+    timestamp: ctx.timestamp,
+  });
+}
+
+/**
+ * NAVI multi-market registry, and the curator position binding that came with it.
+ *
+ * startCheckpoint matches every other binding in this file. These event types did
+ * not exist before v12 so there is nothing to find earlier, and the processor
+ * already walks this range for the handlers above — a later start would not save a
+ * scan, only make the numbers harder to line up.
+ */
+export function NaviMultiMarketProcessor() {
+  navi_adaptor
+    .bind({
+      address: VAULT_ADDRESS,
+      network: ChainId.SUI_MAINNET,
+      startCheckpoint: 175000000n,
+    })
+    .onEventNaviMarketRegistryInitialized(handleNaviMarketRegistryInitialized)
+    .onEventNaviMarketAdded(handleNaviMarketAdded)
+    .onEventNaviMarketRemoved(handleNaviMarketRemoved);
+
+  curator_position
+    .bind({
+      address: VAULT_ADDRESS,
+      network: ChainId.SUI_MAINNET,
+      startCheckpoint: 175000000n,
+    })
+    .onEventVaultCuratorPositionBound(handleVaultCuratorPositionBound);
+}
+
+/** The withdraw-with-swap (zap-out) legs, request through execution or drop. */
+export function WithdrawSwapProcessor() {
+  user_entry
+    .bind({
+      address: VAULT_ADDRESS,
+      network: ChainId.SUI_MAINNET,
+      startCheckpoint: 175000000n,
+    })
+    .onEventWithdrawSwapRequested(handleWithdrawSwapRequested);
+
+  operation
+    .bind({
+      address: VAULT_ADDRESS,
+      network: ChainId.SUI_MAINNET,
+      startCheckpoint: 175000000n,
+    })
+    .onEventWithdrawWithSwapExecuted(handleWithdrawWithSwapExecuted);
+
+  swap_request
+    .bind({
+      address: VAULT_ADDRESS,
+      network: ChainId.SUI_MAINNET,
+      startCheckpoint: 175000000n,
+    })
+    .onEventWithdrawSwapRequestDropped(handleWithdrawSwapRequestDropped);
+}
+
 VoloVaultProcessor();
+NaviMultiMarketProcessor();
+WithdrawSwapProcessor();
 NaviRewardsProcessor();
 OracleProcessor();
 VaultStateMonitorProcessor();
