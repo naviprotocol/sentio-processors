@@ -598,6 +598,24 @@ export const ADDRESSES_PRODUCTION = {
                 USDC: "0xd27352c27ac9b2344bb23bdd94e7a877bc371c0838e905638fb457d83ad0f28b",
             },
         },
+        // Copied verbatim from volo-vault-backend-next sdk/setup/address.production.ts,
+        // the source this whole block mirrors. It was the only vault missing here, and
+        // its absence is what made the processor label a USDC vault "suiBTC".
+        usdc_strategy_curator_0: {
+            vaultId:
+                "0xd27fad0f910c9601c697c50aa5839d476fb9d2434809600c19eb93f3260898f2",
+            rewardManager:
+                "0x5645e1a887b8e7b48c87c6f6c254615491bbde69552c4d974e8cb9c136e8823a",
+            coinSymbol: "USDC",
+            coinType:
+                "0xdba34672e30cb065b1f93e3ab55318768fd6fef66c15942c9f7cb846e2f900e7::usdc::USDC",
+            receiptsId:
+                "0x8f820d8b4684864d7c6af908084bde7feb85884e9870767e654e0c33472d5305",
+            type: "CURATOR",
+            aggregators: {
+                USDC: "0xd27352c27ac9b2344bb23bdd94e7a877bc371c0838e905638fb457d83ad0f28b",
+            },
+        },
     },
     assets: {
         navi: {

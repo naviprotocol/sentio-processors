@@ -47,9 +47,11 @@ Behaviour change — amounts stop being scaled by the wrong decimals:
   correct going forward.
 
   Vault 0xd27fad0f is a USDC vault that was labelled suiBTC — 173,860 USDC of
-  14-day flow recorded as "1,738.6 suiBTC". It is absent from the processor's
-  vault config entirely, so it is now labelled UNKNOWN with amount_normalized
-  left null rather than scaled by somebody else's decimals.
+  14-day flow recorded as "1,738.6 suiBTC". It was the one vault missing from the
+  processor's config, and its entry has now been copied verbatim from
+  volo-vault-backend-next sdk/setup/address.production.ts. It labels as nUSDC/6.
+
+  All 12 vaults with flow now resolve to the asset and decimals the chain reports.
 
 
 CHECK AFTER IT DEPLOYS
@@ -59,19 +61,18 @@ Backfill runs from checkpoint 175000000, so give it time before judging. Then:
 
 cd /Users/haodong/Documents/navi/sentio-alerts && node scripts/volo-vault-label-audit.mjs
 
-Expect: 0 vaults with a corrupted amount scale. 0xd27fad0f will still show as
-unresolved — that is the intended state until Volo supplies its config.
+Expect: 0 vaults with a corrupted amount scale, and no unresolved vaults.
 
 
 TWO THINGS FOR VOLO
 -------------------
 
-1. Vault 0xd27fad0f — USDC-5 in their own rollout-after.json — is missing from
-   ADDRESSES_PRODUCTION.vaults. Adding it needs rewardManager, receiptsId and
-   aggregators, which are theirs to provide. Until then its amounts are recorded
-   raw and unlabelled.
+1. The processor's ADDRESSES_PRODUCTION block is a copy of
+   volo-vault-backend-next sdk/setup/address.production.ts, and it had drifted by
+   one vault. A copy that drifts silently will drift again; worth generating it
+   from the backend config, or at least diffing the two in CI.
 
 2. Historical rows are not corrected by this deploy. Everything before it carries
-   the old scaling: the three USDC vaults understated 1000x, and 0xd27fad0f
+   the old scaling: three USDC vaults understated 1000x, and 0xd27fad0f
    mislabelled as suiBTC. Anything already built on those numbers needs re-reading,
    and a full reprocess is the only way to fix the history.
