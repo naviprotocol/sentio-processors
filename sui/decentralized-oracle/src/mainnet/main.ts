@@ -1,6 +1,7 @@
 import { SuiContext, SuiObjectContext } from "@sentio/sdk/sui";
 import { oracle_pro, oracle } from "../types/sui/0xc2d49bf5e75d2258ee5563efa527feb6155de7ac6f6bf025a23ee88cd12d5a83.js";
 import { getAllTokenData } from "./oracle.js";
+import { FeedConfigProcessor } from "./feed-config.js";
 
 const feedMap: { [key: string]: string } = {
   "0x2cab9b151ca1721624b09b421cc57d0bb26a1feb5da1f821492204b098ec35c9": "SuiFeed",
@@ -118,3 +119,8 @@ oracle_pro
   .onEventOracleUnavailable(oracleUnavailableHandler);
 
 oracle.bind({ startCheckpoint: 39539450n }).onEventPriceUpdated(oraclePriceHandler);
+
+// Per-feed configuration snapshots. See feed-config.ts for why the configured
+// effective price range has to be in the warehouse and not only in an event that
+// fires after a feed has already broken.
+FeedConfigProcessor();

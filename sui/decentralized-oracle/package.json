@@ -8,13 +8,16 @@
     "gen": "sentio gen",
     "test": "sentio test",
     "upload": "sentio upload",
-    "postinstall": "sentio gen"
+    "postinstall": "sentio gen",
+    "config:gen": "node scripts/fetch-oracle-feeds.mjs",
+    "config:gen:check": "node scripts/fetch-oracle-feeds.mjs --check"
   },
   "dependencies": {
     "@sentio/sdk": "^2.39.6"
   },
   "devDependencies": {
     "@sentio/cli": "^2.18.7",
-    "typescript": "^5.5.2"
+    "typescript": "^5.5.2",
+    "mysten-sui-grpc": "npm:@mysten/sui@^2.23.2"
   }
 }
