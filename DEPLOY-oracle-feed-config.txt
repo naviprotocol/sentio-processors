@@ -1,0 +1,84 @@
+Deploy the oracle feed-config snapshot
+======================================
+
+Branch: claude/oracle-feed-config-snapshot  (naviprotocol/sentio-processors)
+Adds:   oracleFeedConfig — a 10-minute snapshot of OracleConfig.feeds[*],
+        carrying minimum_effective_price / maximum_effective_price per feed.
+
+Read this first
+---------------
+A DEFAULT `sentio upload` creates a new version and DEACTIVATES the current
+one, with per-version data isolation. On navi/decentralized_oracle that means
+re-indexing priceUpdated (107 million rows) from checkpoint 39539450 while
+every oracle alert is reading it. This org has already lost a project's data
+this way — see sui/navi/SENTIO_RECOVERY.md, "2026-08-09: data loss confirmed,
+no ACTIVE version at all".
+
+Use --continue-from. It inherits the cursor and does not reprocess.
+
+Node 26 needs YARN_IGNORE_ENGINES=1: an unrelated workspace package,
+fuels@0.101.3, pins node ^20 || ^22 || ^24. Pre-existing, not from this change.
+
+
+1. Get on the branch
+--------------------
+cd ~/Documents/navi_new/sentio-processors
+git fetch origin
+git checkout claude/oracle-feed-config-snapshot
+
+
+2. Find the CURRENT active version number (uploads nothing)
+-----------------------------------------------------------
+cd sui/decentralized-oracle
+echo "no" | YARN_IGNORE_ENGINES=1 yarn upload
+
+   It prints "deactivate pending version N?" and then aborts because of the
+   "no". N is the number you need in step 4.
+
+
+3. Confirm it builds
+--------------------
+YARN_IGNORE_ENGINES=1 yarn build
+
+   Expect "type checking success" and "Packaging success".
+
+
+4. Upload, inheriting the cursor
+--------------------------------
+YARN_IGNORE_ENGINES=1 yarn upload --continue-from <N>
+
+
+5. Wait for rows, then verify (10-20 minutes)
+---------------------------------------------
+cd ~/Documents/navi_new/sentio-alerts
+git fetch origin && git checkout claude/oracle-bounds-from-warehouse
+node scripts/check-feed-bounds.mjs --check
+
+   exit 2 "does not exist yet"  -> not processing yet, wait
+   exit 1 DRIFT                 -> read what it names, do not proceed
+   exit 0                       -> the warehouse matches chain, go to step 6
+
+
+6. Switch the alert to the warehouse bound
+------------------------------------------
+node inspect.mjs --dry-run --file decentralized_oracle.feeds
+
+   The floor rule must return rows, not "query failed". Then:
+
+git checkout claude/dev
+git merge claude/oracle-bounds-from-warehouse
+node sync.mjs plan --diff
+node sync.mjs apply
+node diagnose.mjs
+git push origin claude/dev
+
+
+If a feed is ever added to the oracle
+-------------------------------------
+cd ~/Documents/navi_new/sentio-processors/sui/decentralized-oracle
+yarn config:gen          # re-derives the roster from chain
+yarn config:gen:check    # exits 1 if the committed roster is behind chain
+
+   A feed missing from the roster gets no snapshot rows at all, so nothing
+   watches its floor. check-feed-bounds.mjs in sentio-alerts reports this
+   too, from the other side.
