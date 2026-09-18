@@ -32,6 +32,24 @@ import { ORACLE_FEEDS } from "./generated/oracle-feeds.js";
 // scale cancels. Note the field is spelled `minimum_effective_price` here — the
 // `minmum_effective_price` column on `invalidOraclePrice` preserves a typo in
 // the event, and this is not that event.
+//
+// Numbers go out as BIGINT, not as strings, and that is not a style choice.
+// **A Sentio project's event schema is shared across event types by field
+// name.** `price`, `maximum_effective_price`, `updated_time`,
+// `price_diff_threshold1` / `2` and `historical_price_ttl` already exist on the
+// three event handlers in main.ts, which pass `event.data_decoded.*` straight
+// through as bigints and therefore typed those columns `decimal`. A first
+// version of this file emitted them as strings, which is what a raw value looks
+// like when you are worrying about precision — and the processor refused the
+// whole upload at runtime:
+//
+//     the emitted event data is not compatible with the schema
+//     (reason: schema field [price] not equal, have: decimal, new: string)
+//
+// It went to ERROR and stopped indexing the project entirely — no priceUpdated
+// rows for sixteen hours, so every oracle alert was querying an empty window
+// and reporting nothing wrong. Match the existing column type. BigInt is exact,
+// so nothing is lost by doing so.
 
 const INTERVAL_MINUTES = 10;
 
@@ -75,24 +93,24 @@ export function FeedConfigProcessor() {
             enable: value.enable === true,
 
             // The pair this exists for.
-            minimum_effective_price: String(value.minimum_effective_price),
-            maximum_effective_price: String(value.maximum_effective_price),
+            minimum_effective_price: BigInt(value.minimum_effective_price),
+            maximum_effective_price: BigInt(value.maximum_effective_price),
 
             // The rest of the feed's guard rails, so a rule that needs one of
             // them does not require another processor change to get it.
-            maximum_allowed_span_percentage: String(value.maximum_allowed_span_percentage),
-            price_diff_threshold1: String(value.price_diff_threshold1),
-            price_diff_threshold2: String(value.price_diff_threshold2),
-            max_duration_within_thresholds: String(value.max_duration_within_thresholds),
-            max_timestamp_diff: String(value.max_timestamp_diff),
-            historical_price_ttl: String(value.historical_price_ttl),
+            maximum_allowed_span_percentage: BigInt(value.maximum_allowed_span_percentage),
+            price_diff_threshold1: BigInt(value.price_diff_threshold1),
+            price_diff_threshold2: BigInt(value.price_diff_threshold2),
+            max_duration_within_thresholds: BigInt(value.max_duration_within_thresholds),
+            max_timestamp_diff: BigInt(value.max_timestamp_diff),
+            historical_price_ttl: BigInt(value.historical_price_ttl),
 
             // The feed's own last accepted price, from the same object and the
             // same instant as the bounds. A consumer comparing the two never has
             // to join across tables or worry about the two being from different
             // moments.
-            price: String(history.price ?? ""),
-            updated_time: String(history.updated_time ?? ""),
+            price: BigInt(history.price ?? 0),
+            updated_time: BigInt(history.updated_time ?? 0),
 
             env: "mainnet",
           });
