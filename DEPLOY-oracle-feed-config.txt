@@ -5,16 +5,28 @@ Branch: claude/oracle-feed-config-snapshot  (naviprotocol/sentio-processors)
 Adds:   oracleFeedConfig — a 10-minute snapshot of OracleConfig.feeds[*],
         carrying minimum_effective_price / maximum_effective_price per feed.
 
-Read this first
----------------
-A DEFAULT `sentio upload` creates a new version and DEACTIVATES the current
-one, with per-version data isolation. On navi/decentralized_oracle that means
-re-indexing priceUpdated (107 million rows) from checkpoint 39539450 while
-every oracle alert is reading it. This org has already lost a project's data
-this way — see sui/navi/SENTIO_RECOVERY.md, "2026-08-09: data loss confirmed,
-no ACTIVE version at all".
+Which upload mode, and why
+--------------------------
+As of 2026-09-17 this project has exactly ONE non-obsolete version:
 
-Use --continue-from. It inherits the cursor and does not reprocess.
+    /api/v1/processors/navi/decentralized_oracle/status  ->  v5 ACTIVE
+    (v1-v4 and v6 are all OBSOLETE)
+
+A DEFAULT `yarn upload` creates a new version that backfills from each
+binding's startCheckpoint. The event handlers here start at checkpoint
+39,539,450 and chain head is ~323,900,000 — a ~284 million checkpoint
+re-index, rebuilding priceUpdated's 107 million rows. The comparable navi
+backfill (78M -> 243M) was "several hours to a day" per SENTIO_RECOVERY.md.
+
+You do not need any of that. Config snapshots are only useful going forward,
+so `--continue-from 5` is the right mode: it inherits the cursor, reprocesses
+nothing, and the new bindings simply start emitting from the cursor onward.
+
+The one thing to actually watch, and it is the lesson SENTIO_RECOVERY.md draws
+from the 2026-08-09 loss: never leave this project with a PENDING version and
+no ACTIVE one. That is what dropped navi-production-new's datasets — v127 was
+deactivated by a default upload, then v128 went obsolete, and nothing was
+left. One version is live here right now; keep it that way.
 
 Node 26 needs YARN_IGNORE_ENGINES=1: an unrelated workspace package,
 fuels@0.101.3, pins node ^20 || ^22 || ^24. Pre-existing, not from this change.
@@ -33,7 +45,7 @@ cd sui/decentralized-oracle
 echo "no" | YARN_IGNORE_ENGINES=1 yarn upload
 
    It prints "deactivate pending version N?" and then aborts because of the
-   "no". N is the number you need in step 4.
+   "no". Expected to confirm 5; use whatever it reports in step 4.
 
 
 3. Confirm it builds
@@ -45,11 +57,16 @@ YARN_IGNORE_ENGINES=1 yarn build
 
 4. Upload, inheriting the cursor
 --------------------------------
-YARN_IGNORE_ENGINES=1 yarn upload --continue-from <N>
+YARN_IGNORE_ENGINES=1 yarn upload --continue-from 5
 
 
 5. Wait for rows, then verify (10-20 minutes)
 ---------------------------------------------
+   The snapshot fires every 10 minutes, so the first rows should appear
+   within ~20 minutes. If NOTHING appears after half an hour, that is the
+   signal that --continue-from did not pick up the new bindings and the
+   change needs a fresh version instead. Check before assuming it worked.
+
 cd ~/Documents/navi_new/sentio-alerts
 git fetch origin && git checkout claude/oracle-bounds-from-warehouse
 node scripts/check-feed-bounds.mjs --check
